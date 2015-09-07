@@ -1,0 +1,17 @@
+kubernetes (1.2.0alpha.3) unstable; urgency=low
+
+  * Bump!
+
+ -- yuvipanda <yuvipanda@gmail.com>  Wed, 11 Nov 2015 20:42:15 +0200
+
+kubernetes (1.1.0beta) unstable; urgency=low
+
+  * Bump!
+
+ -- yuvipanda <yuvipanda@gmail.com>  Sat, 24 Oct 2015 20:42:15 +0200
+
+kubernetes (1.1.0alpha.1) unstable; urgency=low
+
+  * Initial Release.
+
+ -- yuvipanda <yuvipanda@gmail.com>  Mon, 07 Sep 2015 20:42:15 +0200
