@@ -56,15 +56,21 @@ func TestExampleFile(t *testing.T) {
 	}
 }
 
-func TestNotAuthorized(t *testing.T) {
-	a, err := newWithContents(t, `{                    "readonly": true, "resource": "events"   }
-{"user":"scheduler", "readonly": true, "resource": "pods"     }
-{"user":"scheduler",                   "resource": "bindings" }
-{"user":"kubelet",   "readonly": true, "resource": "bindings" }
-{"user":"kubelet",                     "resource": "events"   }
-{"user":"alice",                                              "namespace": "projectCaribou"}
-{"user":"bob",       "readonly": true,                        "namespace": "projectCaribou"}
-`)
+func TestAuthorize(t *testing.T) {
+	a, err := newWithContents(t,
+		`{                    "readonly": true,                                                        "nonResourcePath": "/api"}
+		 {                                                                                             "nonResourcePath": "/custom"}
+		 {                                                                                             "nonResourcePath": "/root/*"}
+		 {"user":"noresource",                                                                         "nonResourcePath": "*"}
+		 {                    "readonly": true, "resource": "events"}
+		 {"user":"scheduler", "readonly": true, "resource": "pods"}
+		 {"user":"scheduler",                   "resource": "bindings"}
+		 {"user":"kubelet",   "readonly": true, "resource": "bindings"}
+		 {"user":"kubelet",                     "resource": "events"}
+		 {"user":"alice",                                               "namespace": "projectCaribou"}
+		 {"user":"bob",       "readonly": true,                         "namespace": "projectCaribou"}
+		 {"user":"debbie",                      "resource": "pods",     "namespace": "projectCaribou"}`)
+
 	if err != nil {
 		t.Fatalf("unable to read policy file: %v", err)
 	}
@@ -72,61 +78,92 @@ func TestNotAuthorized(t *testing.T) {
 	uScheduler := user.DefaultInfo{Name: "scheduler", UID: "uid1"}
 	uAlice := user.DefaultInfo{Name: "alice", UID: "uid3"}
 	uChuck := user.DefaultInfo{Name: "chuck", UID: "uid5"}
+	uDebbie := user.DefaultInfo{Name: "debbie", UID: "uid6"}
+	uNoResource := user.DefaultInfo{Name: "noresource", UID: "uid7"}
 
 	testCases := []struct {
-		User        user.DefaultInfo
-		Verb        string
-		Resource    string
-		NS          string
-		ExpectAllow bool
+		User            user.DefaultInfo
+		Verb            string
+		Resource        string
+		NS              string
+		ResourceRequest bool
+		Path            string
+		ExpectAllow     bool
 	}{
 		// Scheduler can read pods
-		{User: uScheduler, Verb: "list", Resource: "pods", NS: "ns1", ExpectAllow: true},
-		{User: uScheduler, Verb: "list", Resource: "pods", NS: "", ExpectAllow: true},
+		{User: uScheduler, Verb: "list", Resource: "pods", NS: "ns1", ResourceRequest: true, ExpectAllow: true},
+		{User: uScheduler, Verb: "list", Resource: "pods", NS: "", ResourceRequest: true, ExpectAllow: true},
 		// Scheduler cannot write pods
-		{User: uScheduler, Verb: "create", Resource: "pods", NS: "ns1", ExpectAllow: false},
-		{User: uScheduler, Verb: "create", Resource: "pods", NS: "", ExpectAllow: false},
+		{User: uScheduler, Verb: "create", Resource: "pods", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+		{User: uScheduler, Verb: "create", Resource: "pods", NS: "", ResourceRequest: true, ExpectAllow: false},
 		// Scheduler can write bindings
-		{User: uScheduler, Verb: "get", Resource: "bindings", NS: "ns1", ExpectAllow: true},
-		{User: uScheduler, Verb: "get", Resource: "bindings", NS: "", ExpectAllow: true},
+		{User: uScheduler, Verb: "get", Resource: "bindings", NS: "ns1", ResourceRequest: true, ExpectAllow: true},
+		{User: uScheduler, Verb: "get", Resource: "bindings", NS: "", ResourceRequest: true, ExpectAllow: true},
 
 		// Alice can read and write anything in the right namespace.
-		{User: uAlice, Verb: "get", Resource: "pods", NS: "projectCaribou", ExpectAllow: true},
-		{User: uAlice, Verb: "get", Resource: "widgets", NS: "projectCaribou", ExpectAllow: true},
-		{User: uAlice, Verb: "get", Resource: "", NS: "projectCaribou", ExpectAllow: true},
-		{User: uAlice, Verb: "update", Resource: "pods", NS: "projectCaribou", ExpectAllow: true},
-		{User: uAlice, Verb: "update", Resource: "widgets", NS: "projectCaribou", ExpectAllow: true},
-		{User: uAlice, Verb: "update", Resource: "", NS: "projectCaribou", ExpectAllow: true},
+		{User: uAlice, Verb: "get", Resource: "pods", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
+		{User: uAlice, Verb: "get", Resource: "widgets", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
+		{User: uAlice, Verb: "get", Resource: "", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
+		{User: uAlice, Verb: "update", Resource: "pods", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
+		{User: uAlice, Verb: "update", Resource: "widgets", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
+		{User: uAlice, Verb: "update", Resource: "", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
 		// .. but not the wrong namespace.
-		{User: uAlice, Verb: "get", Resource: "pods", NS: "ns1", ExpectAllow: false},
-		{User: uAlice, Verb: "get", Resource: "widgets", NS: "ns1", ExpectAllow: false},
-		{User: uAlice, Verb: "get", Resource: "", NS: "ns1", ExpectAllow: false},
+		{User: uAlice, Verb: "get", Resource: "pods", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+		{User: uAlice, Verb: "get", Resource: "widgets", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+		{User: uAlice, Verb: "get", Resource: "", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+
+		// Debbie can write to pods in the right namespace
+		{User: uDebbie, Verb: "update", Resource: "pods", NS: "projectCaribou", ResourceRequest: true, ExpectAllow: true},
 
 		// Chuck can read events, since anyone can.
-		{User: uChuck, Verb: "get", Resource: "events", NS: "ns1", ExpectAllow: true},
-		{User: uChuck, Verb: "get", Resource: "events", NS: "", ExpectAllow: true},
+		{User: uChuck, Verb: "get", Resource: "events", NS: "ns1", ResourceRequest: true, ExpectAllow: true},
+		{User: uChuck, Verb: "get", Resource: "events", NS: "", ResourceRequest: true, ExpectAllow: true},
 		// Chuck can't do other things.
-		{User: uChuck, Verb: "update", Resource: "events", NS: "ns1", ExpectAllow: false},
-		{User: uChuck, Verb: "get", Resource: "pods", NS: "ns1", ExpectAllow: false},
-		{User: uChuck, Verb: "get", Resource: "floop", NS: "ns1", ExpectAllow: false},
-		// Chunk can't access things with no kind or namespace
-		// TODO: find a way to give someone access to miscellaneous endpoints, such as
-		// /healthz, /version, etc.
-		{User: uChuck, Verb: "get", Resource: "", NS: "", ExpectAllow: false},
+		{User: uChuck, Verb: "update", Resource: "events", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+		{User: uChuck, Verb: "get", Resource: "pods", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+		{User: uChuck, Verb: "get", Resource: "floop", NS: "ns1", ResourceRequest: true, ExpectAllow: false},
+		// Chuck can't access things with no resource or namespace
+		{User: uChuck, Verb: "get", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: false},
+		// but can access /api
+		{User: uChuck, Verb: "get", Path: "/api", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+		// though he cannot write to it
+		{User: uChuck, Verb: "create", Path: "/api", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: false},
+		// while he can write to /custom
+		{User: uChuck, Verb: "update", Path: "/custom", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+		// he cannot get "/root"
+		{User: uChuck, Verb: "get", Path: "/root", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: false},
+		// but can get any subpath
+		{User: uChuck, Verb: "get", Path: "/root/", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+		{User: uChuck, Verb: "get", Path: "/root/test/1/2/3", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+
+		// the user "noresource" can get any non-resource request
+		{User: uNoResource, Verb: "get", Path: "", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+		{User: uNoResource, Verb: "get", Path: "/", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+		{User: uNoResource, Verb: "get", Path: "/foo/bar/baz", Resource: "", NS: "", ResourceRequest: false, ExpectAllow: true},
+		// but cannot get any request where IsResourceRequest() == true
+		{User: uNoResource, Verb: "get", Path: "", Resource: "", NS: "", ResourceRequest: true, ExpectAllow: false},
+		{User: uNoResource, Verb: "get", Path: "/", Resource: "", NS: "", ResourceRequest: true, ExpectAllow: false},
+		{User: uNoResource, Verb: "get", Path: "/foo/bar/baz", Resource: "", NS: "", ResourceRequest: true, ExpectAllow: false},
+
+		// When the request is a non-resource request it must not match resources/ns.
+		{User: uAlice, Verb: "update", Path: "/something", Resource: "", NS: "projectCaribou", ResourceRequest: false, ExpectAllow: false},
+		{User: uScheduler, Verb: "update", Path: "/something", Resource: "bindings", NS: "", ResourceRequest: false, ExpectAllow: false},
 	}
 	for i, tc := range testCases {
 		attr := authorizer.AttributesRecord{
-			User:      &tc.User,
-			Verb:      tc.Verb,
-			Resource:  tc.Resource,
-			Namespace: tc.NS,
+			User:            &tc.User,
+			Verb:            tc.Verb,
+			Resource:        tc.Resource,
+			Namespace:       tc.NS,
+			ResourceRequest: tc.ResourceRequest,
+			Path:            tc.Path,
 		}
-		t.Logf("tc: %v -> attr %v", tc, attr)
+		t.Logf("tc %2v: %v -> attr %v", i, tc, attr)
 		err := a.Authorize(attr)
 		actualAllow := bool(err == nil)
 		if tc.ExpectAllow != actualAllow {
-			t.Errorf("%d: Expected allowed=%v but actually allowed=%v\n\t%v",
-				i, tc.ExpectAllow, actualAllow, tc)
+			t.Errorf("Expected allowed=%v but actually allowed=%v, for case %+v & %+v",
+				tc.ExpectAllow, actualAllow, tc, attr)
 		}
 	}
 }
@@ -275,8 +312,10 @@ func TestPolicy(t *testing.T) {
 		name    string
 	}{
 		{
-			policy:  policy{},
-			attr:    authorizer.AttributesRecord{},
+			policy: policy{},
+			attr: authorizer.AttributesRecord{
+				ResourceRequest: true,
+			},
 			matches: true,
 			name:    "null",
 		},
@@ -284,7 +323,9 @@ func TestPolicy(t *testing.T) {
 			policy: policy{
 				Readonly: true,
 			},
-			attr:    authorizer.AttributesRecord{},
+			attr: authorizer.AttributesRecord{
+				ResourceRequest: true,
+			},
 			matches: false,
 			name:    "read-only mismatch",
 		},
@@ -296,6 +337,7 @@ func TestPolicy(t *testing.T) {
 				User: &user.DefaultInfo{
 					Name: "bar",
 				},
+				ResourceRequest: true,
 			},
 			matches: false,
 			name:    "user name mis-match",
@@ -305,7 +347,8 @@ func TestPolicy(t *testing.T) {
 				Resource: "foo",
 			},
 			attr: authorizer.AttributesRecord{
-				Resource: "bar",
+				Resource:        "bar",
+				ResourceRequest: true,
 			},
 			matches: false,
 			name:    "resource mis-match",
@@ -320,8 +363,9 @@ func TestPolicy(t *testing.T) {
 				User: &user.DefaultInfo{
 					Name: "foo",
 				},
-				Resource:  "foo",
-				Namespace: "foo",
+				Resource:        "foo",
+				Namespace:       "foo",
+				ResourceRequest: true,
 			},
 			matches: true,
 			name:    "namespace mis-match",
@@ -331,7 +375,8 @@ func TestPolicy(t *testing.T) {
 				Namespace: "foo",
 			},
 			attr: authorizer.AttributesRecord{
-				Namespace: "bar",
+				Namespace:       "bar",
+				ResourceRequest: true,
 			},
 			matches: false,
 			name:    "resource mis-match",

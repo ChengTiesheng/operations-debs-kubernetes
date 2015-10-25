@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 
 	"k8s.io/kubernetes/pkg/auth/authorizer"
 )
@@ -51,9 +52,10 @@ type policy struct {
 	// the API, we don't have to add lots of policy?
 
 	// TODO: make this a proper REST object with its own registry.
-	Readonly  bool   `json:"readonly,omitempty"`
-	Resource  string `json:"resource,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
+	Readonly        bool   `json:"readonly,omitempty"`
+	Resource        string `json:"resource,omitempty"`
+	Namespace       string `json:"namespace,omitempty"`
+	NonResourcePath string `json:"nonResourcePath,omitempty"`
 
 	// TODO: "expires" string in RFC3339 format.
 
@@ -100,13 +102,14 @@ func NewFromFile(path string) (policyList, error) {
 func (p policy) matches(a authorizer.Attributes) bool {
 	if p.subjectMatches(a) {
 		if p.Readonly == false || (p.Readonly == a.IsReadOnly()) {
-			if p.Resource == "" || (p.Resource == a.GetResource()) {
-				if p.Namespace == "" || (p.Namespace == a.GetNamespace()) {
-					return true
-				}
+			if p.NonResourcePath == "" {
+				return p.resourceMatches(a)
+			} else {
+				return p.nonResourceMatches(a)
 			}
 		}
 	}
+
 	return false
 }
 
@@ -128,6 +131,41 @@ func (p policy) subjectMatches(a authorizer.Attributes) bool {
 		return false
 	}
 
+	return true
+}
+
+func (p policy) nonResourceMatches(a authorizer.Attributes) bool {
+	// A non-resource policy cannot match a resource request
+	if a.IsResourceRequest() {
+		return false
+	}
+	// Allow exact matches of non-resource paths
+	if p.NonResourcePath == a.GetPath() {
+		return true
+	}
+	// Allow a trailing * to match subpaths
+	if strings.HasSuffix(p.NonResourcePath, "*") && strings.HasPrefix(a.GetPath(), strings.TrimRight(p.NonResourcePath, "*")) {
+		return true
+	}
+	return false
+}
+
+func (p policy) resourceMatches(a authorizer.Attributes) bool {
+	// A resource policy cannot match a non-resource request
+	if !a.IsResourceRequest() {
+		return false
+	}
+	// Require the namespace to match if the policy specifies it
+	// TODO: change this to require namespace="*" to match all
+	if p.Namespace != "" && p.Namespace != a.GetNamespace() {
+		return false
+	}
+	// Require the resource to match if the policy specifies it
+	// TODO: change this to require resource="*" to match all
+	if p.Resource != "" && p.Resource != a.GetResource() {
+		return false
+	}
+	// Otherwise, allow
 	return true
 }
 

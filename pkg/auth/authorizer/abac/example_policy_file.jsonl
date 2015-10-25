@@ -1,9 +1,15 @@
 {"user":"admin"}
+{"readonly": true, "nonResourcePath": "/api"}
+{"readonly": true, "nonResourcePath": "/api/*"}
+{"readonly": true, "nonResourcePath": "/apis"}
+{"readonly": true, "nonResourcePath": "/apis/*"}
+{"readonly": true, "nonResourcePath": "/swaggerapi/*"}
+{"readonly": true, "nonResourcePath": "/version"}
 {"user":"scheduler", "readonly": true, "resource": "pods"}
 {"user":"scheduler", "resource": "bindings"}
-{"user":"kubelet",  "readonly": true, "resource": "pods"}
-{"user":"kubelet",  "readonly": true, "resource": "services"}
-{"user":"kubelet",  "readonly": true, "resource": "endpoints"}
+{"user":"kubelet", "readonly": true, "resource": "pods"}
+{"user":"kubelet", "readonly": true, "resource": "services"}
+{"user":"kubelet", "readonly": true, "resource": "endpoints"}
 {"user":"kubelet", "resource": "events"}
 {"user":"alice", "namespace": "projectCaribou"}
 {"user":"bob", "readonly": true, "namespace": "projectCaribou"}
