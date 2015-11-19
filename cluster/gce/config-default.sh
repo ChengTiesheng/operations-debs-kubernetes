@@ -29,7 +29,7 @@ REGISTER_MASTER_KUBELET=${REGISTER_MASTER:-true}
 PREEMPTIBLE_MINION=${PREEMPTIBLE_MINION:-false}
 
 OS_DISTRIBUTION=${KUBE_OS_DISTRIBUTION:-debian}
-MASTER_IMAGE=${KUBE_GCE_MASTER_IMAGE:-container-vm-v20150806}
+MASTER_IMAGE=${KUBE_GCE_MASTER_IMAGE:-container-vm-v20151103}
 MASTER_IMAGE_PROJECT=${KUBE_GCE_MASTER_PROJECT:-google-containers}
 MINION_IMAGE=${KUBE_GCE_MINION_IMAGE:-"${MASTER_IMAGE}"}
 MINION_IMAGE_PROJECT=${KUBE_GCE_MINION_PROJECT:-"${MASTER_IMAGE_PROJECT}"}
@@ -113,7 +113,7 @@ if [[ "${ENABLE_DAEMONSETS}" == "true" ]]; then
 fi
 
 # Admission Controllers to invoke prior to persisting objects in cluster
-ADMISSION_CONTROL=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota
+ADMISSION_CONTROL=NamespaceLifecycle,LimitRanger,ServiceAccount,ResourceQuota
 
 # Optional: if set to true kube-up will automatically check for existing resources and clean them up.
 KUBE_UP_AUTOMATIC_CLEANUP=${KUBE_UP_AUTOMATIC_CLEANUP:-false}

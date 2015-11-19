@@ -32,6 +32,7 @@ import (
 	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/kubernetes/pkg/api/validation"
 	"k8s.io/kubernetes/pkg/client/metrics"
 	"k8s.io/kubernetes/pkg/conversion/queryparams"
 	"k8s.io/kubernetes/pkg/fields"
@@ -149,6 +150,10 @@ func (r *Request) Resource(resource string) *Request {
 		r.err = fmt.Errorf("resource already set to %q, cannot change to %q", r.resource, resource)
 		return r
 	}
+	if ok, msg := validation.IsValidPathSegmentName(resource); !ok {
+		r.err = fmt.Errorf("invalid resource %q: %s", resource, msg)
+		return r
+	}
 	r.resource = resource
 	return r
 }
@@ -163,6 +168,12 @@ func (r *Request) SubResource(subresources ...string) *Request {
 	if len(r.subresource) != 0 {
 		r.err = fmt.Errorf("subresource already set to %q, cannot change to %q", r.resource, subresource)
 		return r
+	}
+	for _, s := range subresources {
+		if ok, msg := validation.IsValidPathSegmentName(s); !ok {
+			r.err = fmt.Errorf("invalid subresource %q: %s", s, msg)
+			return r
+		}
 	}
 	r.subresource = subresource
 	return r
@@ -181,6 +192,10 @@ func (r *Request) Name(resourceName string) *Request {
 		r.err = fmt.Errorf("resource name already set to %q, cannot change to %q", r.resourceName, resourceName)
 		return r
 	}
+	if ok, msg := validation.IsValidPathSegmentName(resourceName); !ok {
+		r.err = fmt.Errorf("invalid resource name %q: %s", resourceName, msg)
+		return r
+	}
 	r.resourceName = resourceName
 	return r
 }
@@ -194,6 +209,10 @@ func (r *Request) Namespace(namespace string) *Request {
 		r.err = fmt.Errorf("namespace already set to %q, cannot change to %q", r.namespace, namespace)
 		return r
 	}
+	if ok, msg := validation.IsValidPathSegmentName(namespace); !ok {
+		r.err = fmt.Errorf("invalid namespace %q: %s", namespace, msg)
+		return r
+	}
 	r.namespaceSet = true
 	r.namespace = namespace
 	return r
@@ -204,23 +223,6 @@ func (r *Request) NamespaceIfScoped(namespace string, scoped bool) *Request {
 	if scoped {
 		return r.Namespace(namespace)
 	}
-	return r
-}
-
-// UnversionedPath strips the apiVersion from the baseURL before appending segments.
-func (r *Request) UnversionedPath(segments ...string) *Request {
-	if r.err != nil {
-		return r
-	}
-	upath := path.Clean(r.baseURL.Path)
-	//TODO(jdef) this is a pretty hackish version test
-	if strings.HasPrefix(path.Base(upath), "v") {
-		upath = path.Dir(upath)
-		if upath == "." {
-			upath = "/"
-		}
-	}
-	r.path = path.Join(append([]string{upath}, segments...)...)
 	return r
 }
 
@@ -839,7 +841,10 @@ func isTextResponse(resp *http.Response) bool {
 // checkWait returns true along with a number of seconds if the server instructed us to wait
 // before retrying.
 func checkWait(resp *http.Response) (int, bool) {
-	if resp.StatusCode != errors.StatusTooManyRequests {
+	switch r := resp.StatusCode; {
+	// any 500 error code and 429 can trigger a wait
+	case r == errors.StatusTooManyRequests, r >= 500:
+	default:
 		return 0, false
 	}
 	i, ok := retryAfterSeconds(resp)

@@ -50,6 +50,7 @@ import (
 	proberesults "k8s.io/kubernetes/pkg/kubelet/prober/results"
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
+	"k8s.io/kubernetes/pkg/kubelet/util/queue"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/types"
 	"k8s.io/kubernetes/pkg/util"
@@ -110,7 +111,6 @@ func newTestKubelet(t *testing.T) *TestKubelet {
 	kubelet.serviceLister = testServiceLister{}
 	kubelet.nodeLister = testNodeLister{}
 	kubelet.recorder = fakeRecorder
-	kubelet.statusManager = status.NewManager(fakeKubeClient)
 	if err := kubelet.setupDataDirs(); err != nil {
 		t.Fatalf("can't initialize kubelet data dirs: %v", err)
 	}
@@ -119,6 +119,7 @@ func newTestKubelet(t *testing.T) *TestKubelet {
 	kubelet.cadvisor = mockCadvisor
 	fakeMirrorClient := kubepod.NewFakeMirrorClient()
 	kubelet.podManager = kubepod.NewBasicPodManager(fakeMirrorClient)
+	kubelet.statusManager = status.NewManager(fakeKubeClient, kubelet.podManager)
 	kubelet.containerRefManager = kubecontainer.NewRefManager()
 	diskSpaceManager, err := newDiskSpaceManager(mockCadvisor, DiskSpacePolicy{})
 	if err != nil {
@@ -145,6 +146,7 @@ func newTestKubelet(t *testing.T) *TestKubelet {
 	kubelet.backOff.Clock = fakeClock
 	kubelet.podKillingCh = make(chan *kubecontainer.Pod, 20)
 	kubelet.resyncInterval = 10 * time.Second
+	kubelet.workQueue = queue.NewBasicWorkQueue()
 	return &TestKubelet{kubelet, fakeRuntime, mockCadvisor, fakeKubeClient, fakeMirrorClient}
 }
 
@@ -158,6 +160,7 @@ func newTestPods(count int) []*api.Pod {
 				},
 			},
 			ObjectMeta: api.ObjectMeta{
+				UID:  types.UID(10000 + i),
 				Name: fmt.Sprintf("pod%d", i),
 			},
 		}
@@ -333,14 +336,17 @@ func TestSyncLoopTimeUpdate(t *testing.T) {
 	}
 
 	// Start sync ticker.
-	kubelet.resyncTicker = time.NewTicker(time.Millisecond)
-
-	kubelet.syncLoopIteration(make(chan kubetypes.PodUpdate), kubelet)
+	syncCh := make(chan time.Time, 1)
+	housekeepingCh := make(chan time.Time, 1)
+	syncCh <- time.Now()
+	kubelet.syncLoopIteration(make(chan kubetypes.PodUpdate), kubelet, syncCh, housekeepingCh)
 	loopTime2 := kubelet.LatestLoopEntryTime()
 	if loopTime2.IsZero() {
 		t.Errorf("Unexpected sync loop time: 0, expected non-zero value.")
 	}
-	kubelet.syncLoopIteration(make(chan kubetypes.PodUpdate), kubelet)
+
+	syncCh <- time.Now()
+	kubelet.syncLoopIteration(make(chan kubetypes.PodUpdate), kubelet, syncCh, housekeepingCh)
 	loopTime3 := kubelet.LatestLoopEntryTime()
 	if !loopTime3.After(loopTime1) {
 		t.Errorf("Sync Loop Time was not updated correctly. Second update timestamp should be greater than first update timestamp")
@@ -353,15 +359,12 @@ func TestSyncLoopAbort(t *testing.T) {
 	kubelet := testKubelet.kubelet
 	kubelet.lastTimestampRuntimeUp = time.Now()
 	kubelet.networkConfigured = true
-	// The syncLoop waits on the resyncTicker, so we stop it immediately to avoid a race.
-	kubelet.resyncTicker = time.NewTicker(time.Second)
-	kubelet.resyncTicker.Stop()
 
 	ch := make(chan kubetypes.PodUpdate)
 	close(ch)
 
 	// sanity check (also prevent this test from hanging in the next step)
-	ok := kubelet.syncLoopIteration(ch, kubelet)
+	ok := kubelet.syncLoopIteration(ch, kubelet, make(chan time.Time), make(chan time.Time))
 	if ok {
 		t.Fatalf("expected syncLoopIteration to return !ok since update chan was closed")
 	}
@@ -3245,39 +3248,6 @@ func TestGetContainerInfoForMirrorPods(t *testing.T) {
 		t.Fatalf("stats should not be nil")
 	}
 	mockCadvisor.AssertExpectations(t)
-}
-
-func TestDoNotCacheStatusForStaticPods(t *testing.T) {
-	testKubelet := newTestKubelet(t)
-	testKubelet.fakeCadvisor.On("MachineInfo").Return(&cadvisorapi.MachineInfo{}, nil)
-	testKubelet.fakeCadvisor.On("DockerImagesFsInfo").Return(cadvisorapiv2.FsInfo{}, nil)
-	testKubelet.fakeCadvisor.On("RootFsInfo").Return(cadvisorapiv2.FsInfo{}, nil)
-	kubelet := testKubelet.kubelet
-
-	pods := []*api.Pod{
-		{
-			ObjectMeta: api.ObjectMeta{
-				UID:       "12345678",
-				Name:      "staticFoo",
-				Namespace: "new",
-				Annotations: map[string]string{
-					kubetypes.ConfigSourceAnnotationKey: "file",
-				},
-			},
-			Spec: api.PodSpec{
-				Containers: []api.Container{
-					{Name: "bar"},
-				},
-			},
-		},
-	}
-
-	kubelet.podManager.SetPods(pods)
-	kubelet.HandlePodSyncs(kubelet.podManager.GetPods())
-	status, ok := kubelet.statusManager.GetPodStatus(pods[0].UID)
-	if ok {
-		t.Errorf("unexpected status %#v found for static pod %q", status, pods[0].UID)
-	}
 }
 
 func TestHostNetworkAllowed(t *testing.T) {

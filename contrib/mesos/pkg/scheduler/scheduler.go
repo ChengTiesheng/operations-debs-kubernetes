@@ -21,7 +21,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"reflect"
 	"sync"
 	"time"
 
@@ -503,7 +502,7 @@ func (k *KubernetesScheduler) reconcileNonTerminalTask(driver bindings.Scheduler
 	} else if pod, err := k.client.Pods(namespace).Get(name); err == nil {
 		if t, ok, err := podtask.RecoverFrom(*pod); ok {
 			log.Infof("recovered task %v from metadata in pod %v/%v", taskId, namespace, name)
-			_, err := k.taskRegistry.Register(t, nil)
+			_, err := k.taskRegistry.Register(t)
 			if err != nil {
 				// someone beat us to it?!
 				log.Warningf("failed to register recovered task: %v", err)
@@ -687,7 +686,7 @@ func (k *KubernetesScheduler) explicitlyReconcileTasks(driver bindings.Scheduler
 
 	// tell mesos to send us the latest status updates for all the non-terminal tasks that we know about
 	statusList := []*mesos.TaskStatus{}
-	remaining := sets.KeySet(reflect.ValueOf(taskToSlave))
+	remaining := sets.StringKeySet(taskToSlave)
 	for taskId, slaveId := range taskToSlave {
 		if slaveId == "" {
 			delete(taskToSlave, taskId)
@@ -913,7 +912,7 @@ func (ks *KubernetesScheduler) recoverTasks() error {
 				log.Errorf("failed to delete pod '%v/%v': %v", pod.Namespace, pod.Name, err)
 			}
 		} else if ok {
-			ks.taskRegistry.Register(t, nil)
+			ks.taskRegistry.Register(t)
 			recoverSlave(t)
 			log.Infof("recovered task %v from pod %v/%v", t.ID, pod.Namespace, pod.Name)
 		}

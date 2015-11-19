@@ -118,7 +118,7 @@ func NewCMServer() *CMServer {
 		NodeSyncPeriod:                    10 * time.Second,
 		ResourceQuotaSyncPeriod:           10 * time.Second,
 		NamespaceSyncPeriod:               5 * time.Minute,
-		PVClaimBinderSyncPeriod:           10 * time.Second,
+		PVClaimBinderSyncPeriod:           10 * time.Minute,
 		HorizontalPodAutoscalerSyncPeriod: 30 * time.Second,
 		DeploymentControllerSyncPeriod:    30 * time.Second,
 		MinResyncPeriod:                   12 * time.Hour,
@@ -336,7 +336,8 @@ func (s *CMServer) Run(_ []string) error {
 		glog.Infof("Starting %s apis", groupVersion)
 		if containsResource(resources, "horizontalpodautoscalers") {
 			glog.Infof("Starting horizontal pod controller.")
-			podautoscaler.NewHorizontalController(kubeClient, metrics.NewHeapsterMetricsClient(kubeClient)).
+			metricsClient := metrics.NewHeapsterMetricsClient(kubeClient, metrics.DefaultHeapsterNamespace, metrics.DefaultHeapsterService)
+			podautoscaler.NewHorizontalController(kubeClient, metricsClient).
 				Run(s.HorizontalPodAutoscalerSyncPeriod)
 		}
 

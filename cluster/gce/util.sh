@@ -393,6 +393,7 @@ function create-node-template {
         fi
         echo -e "${color_yellow}Attempt ${attempt} failed to create instance template $template_name. Retrying.${color_norm}" >&2
         attempt=$(($attempt+1))
+        sleep $(($attempt * 5))
     else
         break
     fi
@@ -419,6 +420,7 @@ function add-instance-metadata {
         fi
         echo -e "${color_yellow}Attempt $(($attempt+1)) failed to add metadata in ${instance}. Retrying.${color_norm}" >&2
         attempt=$(($attempt+1))
+        sleep $((5 * $attempt))
     else
         break
     fi
@@ -446,6 +448,7 @@ function add-instance-metadata-from-file {
         fi
         echo -e "${color_yellow}Attempt $(($attempt+1)) failed to add metadata in ${instance}. Retrying.${color_norm}" >&2
         attempt=$(($attempt+1))
+        sleep $(($attempt * 5))
     else
         break
     fi
@@ -713,7 +716,7 @@ function kube-up {
 
   # curl in mavericks is borked.
   secure=""
-  if which sw_vers > /dev/null; then
+  if which sw_vers >& /dev/null; then
     if [[ $(sw_vers | grep ProductVersion | awk '{print $2}') = "10.9."* ]]; then
       secure="--insecure"
     fi

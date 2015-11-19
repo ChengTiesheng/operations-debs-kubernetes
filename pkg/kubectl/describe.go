@@ -79,6 +79,7 @@ func describerMap(c *client.Client) map[string]Describer {
 		"PersistentVolume":      &PersistentVolumeDescriber{c},
 		"PersistentVolumeClaim": &PersistentVolumeClaimDescriber{c},
 		"Namespace":             &NamespaceDescriber{c},
+		"Endpoints":             &EndpointsDescriber{c},
 	}
 	return m
 }
@@ -1105,6 +1106,76 @@ func describeService(service *api.Service, endpoints *api.Endpoints, events *api
 	})
 }
 
+// EndpointsDescriber generates information about an Endpoint.
+type EndpointsDescriber struct {
+	client.Interface
+}
+
+func (d *EndpointsDescriber) Describe(namespace, name string) (string, error) {
+	c := d.Endpoints(namespace)
+
+	ep, err := c.Get(name)
+	if err != nil {
+		return "", err
+	}
+
+	events, _ := d.Events(namespace).Search(ep)
+
+	return describeEndpoints(ep, events)
+}
+
+func describeEndpoints(ep *api.Endpoints, events *api.EventList) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		fmt.Fprintf(out, "Name:\t%s\n", ep.Name)
+		fmt.Fprintf(out, "Namespace:\t%s\n", ep.Namespace)
+		fmt.Fprintf(out, "Labels:\t%s\n", labels.FormatLabels(ep.Labels))
+
+		fmt.Fprintf(out, "Subsets:\n")
+		for i := range ep.Subsets {
+			subset := &ep.Subsets[i]
+
+			addresses := []string{}
+			for _, addr := range subset.Addresses {
+				addresses = append(addresses, addr.IP)
+			}
+			addressesString := strings.Join(addresses, ",")
+			if len(addressesString) == 0 {
+				addressesString = "<none>"
+			}
+			fmt.Fprintf(out, "  Addresses:\t%s\n", addressesString)
+
+			notReadyAddresses := []string{}
+			for _, addr := range subset.NotReadyAddresses {
+				notReadyAddresses = append(notReadyAddresses, addr.IP)
+			}
+			notReadyAddressesString := strings.Join(notReadyAddresses, ",")
+			if len(notReadyAddressesString) == 0 {
+				notReadyAddressesString = "<none>"
+			}
+			fmt.Fprintf(out, "  NotReadyAddresses:\t%s\n", notReadyAddressesString)
+
+			if len(subset.Ports) > 0 {
+				fmt.Fprintf(out, "  Ports:\n")
+				fmt.Fprintf(out, "    Name\tPort\tProtocol\n")
+				fmt.Fprintf(out, "    ----\t----\t--------\n")
+				for _, port := range subset.Ports {
+					name := port.Name
+					if len(name) == 0 {
+						name = "<unnamed>"
+					}
+					fmt.Fprintf(out, "    %s\t%d\t%s\n", name, port.Port, port.Protocol)
+				}
+			}
+			fmt.Fprintf(out, "\n")
+		}
+
+		if events != nil {
+			DescribeEvents(events, out)
+		}
+		return nil
+	})
+}
+
 // ServiceAccountDescriber generates information about a service.
 type ServiceAccountDescriber struct {
 	client.Interface
@@ -1295,9 +1366,8 @@ func (d *HorizontalPodAutoscalerDescriber) Describe(namespace, name string) (str
 		fmt.Fprintf(out, "Namespace:\t%s\n", hpa.Namespace)
 		fmt.Fprintf(out, "Labels:\t%s\n", labels.FormatLabels(hpa.Labels))
 		fmt.Fprintf(out, "CreationTimestamp:\t%s\n", hpa.CreationTimestamp.Time.Format(time.RFC1123Z))
-		fmt.Fprintf(out, "Reference:\t%s/%s/%s/%s\n",
+		fmt.Fprintf(out, "Reference:\t%s/%s/%s\n",
 			hpa.Spec.ScaleRef.Kind,
-			hpa.Spec.ScaleRef.Namespace,
 			hpa.Spec.ScaleRef.Name,
 			hpa.Spec.ScaleRef.Subresource)
 		if hpa.Spec.CPUUtilization != nil {
@@ -1319,7 +1389,7 @@ func (d *HorizontalPodAutoscalerDescriber) Describe(namespace, name string) (str
 		// TODO: switch to scale subresource once the required code is submitted.
 		if strings.ToLower(hpa.Spec.ScaleRef.Kind) == "replicationcontroller" {
 			fmt.Fprintf(out, "ReplicationController pods:\t")
-			rc, err := d.client.ReplicationControllers(hpa.Spec.ScaleRef.Namespace).Get(hpa.Spec.ScaleRef.Name)
+			rc, err := d.client.ReplicationControllers(hpa.Namespace).Get(hpa.Spec.ScaleRef.Name)
 			if err == nil {
 				fmt.Fprintf(out, "%d current / %d desired\n", rc.Status.Replicas, rc.Spec.Replicas)
 			} else {
